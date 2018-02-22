@@ -239,7 +239,7 @@ function toQueryString(params) {
 }
 
 function etherscanXHR({ method, proto, network, apiKey, module, action, params }, end) {
-  var uri = proto + '://' + network + '.etherscan.io/api?' + toQueryString({ module: module, action: action }) + '&' + toQueryString(params)
+  var uri = proto + '://api-' + network + '.etherscan.io/api?' + toQueryString({ module: module, action: action }) + '&' + toQueryString(params)
   if (apiKey) uri += '&' + toQueryString({ apikey: apiKey })
 
   xhr({
