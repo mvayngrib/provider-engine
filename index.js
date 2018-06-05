@@ -53,12 +53,21 @@ Web3ProviderEngine.prototype.start = function(){
   const self = this
   // start block polling
   self._blockTracker.start()
+  self._running = true
+  self.emit('start')
 }
 
 Web3ProviderEngine.prototype.stop = function(){
   const self = this
   // stop block polling
   self._blockTracker.stop()
+  self._running = false
+  self.emit('stop')
+}
+
+Web3ProviderEngine.prototype.isRunning = function(){
+  const self = this
+  return this._running
 }
 
 Web3ProviderEngine.prototype.addProvider = function(source){
