@@ -255,6 +255,12 @@ function etherscanXHR({ method, proto, network, apiKey, module, action, params }
 
     if (err) return end(err)
 
+    if(body.indexOf('403 - Forbidden: Access is denied.') > -1)
+       return end('403 - Forbidden: Access is denied.')
+
+    if (res.statusCode > 300)
+      return end(res.statusMessage || body)
+
 	  /*console.log('[etherscan request]'
 				  + ' method: ' + useGetMethod
 				  + ' proto: ' + proto
@@ -263,9 +269,6 @@ function etherscanXHR({ method, proto, network, apiKey, module, action, params }
 				  + ' action: ' + action
 				  + ' params: ' + params
 				  + ' return body: ' + body);*/
-
-    if(body.indexOf('403 - Forbidden: Access is denied.') > -1)
-    	return end('403 - Forbidden: Access is denied.')
 
     var data
     try {
