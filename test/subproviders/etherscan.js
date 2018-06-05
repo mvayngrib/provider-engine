@@ -1,8 +1,45 @@
+const querystring = require('querystring')
 const sha3 = require('ethereumjs-util').sha3;
 const test = require('tape')
+const nock = require('nock')
 const ProviderEngine = require('../../index.js')
 const createPayload = require('../../util/create-payload.js')
 const EtherscanSubprovider = require('../../subproviders/etherscan')
+const getQuery = function (uri) {
+  const qs = uri.split('?')[1]
+  return qs ? querystring.parse(qs): {}
+}
+
+test('apiKey', function (t) {
+  t.plan(3)
+
+  const apiKey = 'abc'
+  const etherscan = new EtherscanSubprovider({ https: true, apiKey })
+  const payload = createPayload({
+    method: 'eth_getBlockTransactionCountByNumber',
+    params: [
+      '0x132086'
+    ],
+  })
+
+  nock('https://api.etherscan.io')
+    .get(function (uri) {
+      const query = getQuery(uri)
+      t.equal(query.apikey, apiKey)
+      return true
+    })
+    .reply(200, {
+      message: 'OK',
+      result: '0x0'
+    })
+
+  etherscan.handleRequest(payload, t.fail, function (err, result) {
+    t.error(err)
+    t.equal(result, '0x0')
+  })
+
+  etherscan.handleRequests()
+})
 
 test('etherscan eth_getBlockTransactionCountByNumber', function(t) {
   t.plan(3)

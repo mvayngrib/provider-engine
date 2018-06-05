@@ -24,7 +24,16 @@
 
 const xhr = process.browser ? require('xhr') : require('request')
 const inherits = require('util').inherits
+const extend = require('xtend')
 const Subprovider = require('./subprovider.js')
+const LIST_TX_PROPS = [
+  'address',
+  'startblock',
+  'endblock',
+  'sort',
+  'page',
+  'offset'
+]
 
 module.exports = EtherscanProvider
 
@@ -33,32 +42,48 @@ inherits(EtherscanProvider, Subprovider)
 function EtherscanProvider(opts) {
   opts = opts || {}
   this.network = opts.network || 'api'
+  this.apiKey = opts.apiKey
   this.proto = (opts.https || false) ? 'https' : 'http'
   this.requests = [];
   this.times = isNaN(opts.times) ? 4 : opts.times;
   this.interval = isNaN(opts.interval) ? 1000 : opts.interval;
   this.retryFailed = typeof opts.retryFailed === 'boolean' ? opts.retryFailed : true; // not built yet
-  
-  setInterval(this.handleRequests, this.interval, this);
 }
 
-EtherscanProvider.prototype.handleRequests = function(self){
-	if(self.requests.length == 0) return;
-	
-	//console.log('Handling the next ' + self.times + ' of ' + self.requests.length + ' requests');
-	
-	for(var requestIndex = 0; requestIndex < self.times; requestIndex++) {
-		var requestItem = self.requests.shift()
-  		
+EtherscanProvider.prototype.handleRequests = function(){
+	if(this.requests.length == 0) return;
+
+	//console.log('Handling the next ' + this.times + ' of ' + this.requests.length + ' requests');
+
+	for(var requestIndex = 0; requestIndex < this.times; requestIndex++) {
+		var requestItem = this.requests.shift()
+
 		if(typeof requestItem !== 'undefined')
-			handlePayload(requestItem.proto, requestItem.network, requestItem.payload, requestItem.next, requestItem.end)
+			handlePayload(requestItem)
 	}
 }
 
+EtherscanProvider.prototype.stop = function () {
+  clearInterval(this._interval)
+}
+
+EtherscanProvider.prototype.start = function () {
+  // avoid scheduling multiple intervals
+  this.stop()
+  this._interval = setInterval(this.handleRequests.bind(this), this.interval)
+}
+
 EtherscanProvider.prototype.handleRequest = function(payload, next, end){
-  var requestObject = {proto: this.proto, network: this.network, payload: payload, next: next, end: end},
+  var requestObject = {
+      proto: this.proto,
+      network: this.network,
+      payload: payload,
+      next: next,
+      end: end,
+      apiKey: this.apiKey
+    },
 	  self = this;
-  
+
   if(this.retryFailed)
 	  requestObject.end = function(err, result){
 		  if(err === '403 - Forbidden: Access is denied.')
@@ -66,69 +91,74 @@ EtherscanProvider.prototype.handleRequest = function(payload, next, end){
 		  else
 			 end(err, result);
 		  };
-	
+
   this.requests.push(requestObject);
 }
 
-function handlePayload(proto, network, payload, next, end){
+function handlePayload(opts){
+  opts = extend(opts)
+  const { payload, next, network, apiKey } = opts
+
+  // defaults
+  let proto = opts.proto
+  let method = 'GET'
+  let module = 'proxy'
+  let params = {}
+  let action = payload.method
+  let end = opts.end
+
   switch(payload.method) {
     case 'eth_blockNumber':
-      etherscanXHR(true, proto, network, 'proxy', 'eth_blockNumber', {}, end)
-      return
-
+      break
     case 'eth_getBlockByNumber':
-      etherscanXHR(true, proto, network, 'proxy', 'eth_getBlockByNumber', {
+      params = {
         tag: payload.params[0],
-        boolean: payload.params[1] }, end)
-      return
+        boolean: payload.params[1]
+      }
+      break
 
     case 'eth_getBlockTransactionCountByNumber':
-      etherscanXHR(true, proto, network, 'proxy', 'eth_getBlockTransactionCountByNumber', {
+      params = {
         tag: payload.params[0]
-      }, end)
-      return
+      }
+      break
 
     case 'eth_getTransactionByHash':
-      etherscanXHR(true, proto, network, 'proxy', 'eth_getTransactionByHash', {
+      params = {
         txhash: payload.params[0]
-      }, end)
-      return
+      }
+      break
 
     case 'eth_getBalance':
-      etherscanXHR(true, proto, network, 'account', 'balance', {
+      module = 'account'
+      action = 'balance'
+      params = {
         address: payload.params[0],
-        tag: payload.params[1] }, end)
-      return
+        tag: payload.params[1]
+      }
+      break
 
     case 'eth_listTransactions':
-      const props = [
-        'address',
-        'startblock',
-        'endblock',
-        'sort',
-        'page',
-        'offset'
-      ]
-
-      const params = {}
-      for (let i = 0, l = Math.min(payload.params.length, props.length); i < l; i++) {
-        params[props[i]] = payload.params[i]
+      for (let i = 0, l = Math.min(payload.params.length, LIST_TX_PROPS.length); i < l; i++) {
+        params[LIST_TX_PROPS[i]] = payload.params[i]
       }
 
-      etherscanXHR(true, proto, network, 'account', 'txlist', params, end)
-      return
+      module = 'account'
+      action = 'txlist'
+      break
 
     case 'eth_call':
-      etherscanXHR(true, proto, network, 'proxy', 'eth_call', payload.params[0], end)
-      return
+      params = payload.params[0]
+      break
 
     case 'eth_sendRawTransaction':
-      etherscanXHR(false, proto, network, 'proxy', 'eth_sendRawTransaction', { hex: payload.params[0] }, end)
-      return
+      method = 'POST'
+      params = { hex: payload.params[0] }
+      break
 
     case 'eth_getTransactionReceipt':
-      etherscanXHR(true, proto, network, 'proxy', 'eth_getTransactionReceipt', { txhash: payload.params[0] }, end)
-      return
+      params = { txhash: payload.params[0] }
+      break
 
     // note !! this does not support topic filtering yet, it will return all block logs
     case 'eth_getLogs':
@@ -136,47 +166,70 @@ function handlePayload(proto, network, payload, next, end){
           txProcessed = 0,
           logs = [];
 
-      etherscanXHR(true, proto, network, 'proxy', 'eth_getBlockByNumber', {
+      action = 'eth_getBlockByNumber'
+      params = {
         tag: payloadObject.toBlock,
-        boolean: payload.params[1] }, function(err, blockResult) {
-          if(err) return end(err);
+        boolean: payload.params[1]
+      }
 
-          for(var transaction in blockResult.transactions){
-            etherscanXHR(true, proto, network, 'proxy', 'eth_getTransactionReceipt', { txhash: transaction.hash }, function(err, receiptResult) {
-              if(!err) logs.concat(receiptResult.logs);
-              txProcessed += 1;
-              if(txProcessed === blockResult.transactions.length) end(null, logs)
-            })
-          }
+      end = function(err, blockResult) {
+        const originalEnd = opts.end
+        if(err) return originalEnd(err);
+
+        blockResult.transactions.forEach(function (transaction) {
+          etherscanXHR({
+            method: 'GET',
+            proto: proto,
+            network: network,
+            module: 'proxy',
+            action: 'eth_getTransactionReceipt',
+            params: { txhash: transaction.hash },
+          }, function(err, receiptResult) {
+            if(!err) logs.concat(receiptResult.logs);
+            txProcessed += 1;
+            if(txProcessed === blockResult.transactions.length) originalEnd(null, logs)
+          })
         })
-      return
+      }
+
+      break
 
     case 'eth_getTransactionCount':
-      etherscanXHR(true, proto, network, 'proxy', 'eth_getTransactionCount', {
+      params = {
         address: payload.params[0],
         tag: payload.params[1]
-      }, end)
-      return
+      }
+      break
 
     case 'eth_getCode':
-      etherscanXHR(true, proto, network, 'proxy', 'eth_getCode', {
+      params = {
         address: payload.params[0],
         tag: payload.params[1]
-      }, end)
-      return
+      }
+      break
 
     case 'eth_getStorageAt':
-      etherscanXHR(true, proto, network, 'proxy', 'eth_getStorageAt', {
+      params = {
         address: payload.params[0],
         position: payload.params[1],
         tag: payload.params[2]
-      }, end)
-      return
+      }
+      break
 
     default:
       next();
       return
   }
+
+  etherscanXHR({
+    method: method,
+    proto: proto,
+    network: network,
+    apiKey: apiKey,
+    module: module,
+    action: action,
+    params: params
+  }, end)
 }
 
 function toQueryString(params) {
@@ -185,12 +238,13 @@ function toQueryString(params) {
   }).join('&')
 }
 
-function etherscanXHR(useGetMethod, proto, network, module, action, params, end) {
+function etherscanXHR({ method, proto, network, apiKey, module, action, params }, end) {
   var uri = proto + '://' + network + '.etherscan.io/api?' + toQueryString({ module: module, action: action }) + '&' + toQueryString(params)
-	
+  if (apiKey) uri += '&' + toQueryString({ apikey: apiKey })
+
   xhr({
     uri: uri,
-    method: useGetMethod ? 'GET' : 'POST',
+    method: method,
     headers: {
       'Accept': 'application/json',
       // 'Content-Type': 'application/json',
@@ -200,8 +254,8 @@ function etherscanXHR(useGetMethod, proto, network, module, action, params, end)
     // console.log('[etherscan] response: ', err)
 
     if (err) return end(err)
-	
-	  /*console.log('[etherscan request]' 
+
+	  /*console.log('[etherscan request]'
 				  + ' method: ' + useGetMethod
 				  + ' proto: ' + proto
 				  + ' network: ' + network
@@ -209,10 +263,10 @@ function etherscanXHR(useGetMethod, proto, network, module, action, params, end)
 				  + ' action: ' + action
 				  + ' params: ' + params
 				  + ' return body: ' + body);*/
-	
+
     if(body.indexOf('403 - Forbidden: Access is denied.') > -1)
     	return end('403 - Forbidden: Access is denied.')
-	  
+
     var data
     try {
       data = JSON.parse(body)
