@@ -107,6 +107,8 @@ function handlePayload(opts){
   let action = payload.method
   let end = opts.end
 
+  const params0 = payload.params[0]
+
   switch(payload.method) {
     case 'eth_blockNumber':
       break
@@ -215,6 +217,14 @@ function handlePayload(opts){
         tag: payload.params[2]
       }
       break
+    case 'eth_estimateGas':
+      params = pickNonNull({
+        to: params0.to,
+        value: params0.value,
+        gasPrice: params0.gasPrice,
+        gas: params0.gas
+      })
+      break
 
     default:
       next();
@@ -293,4 +303,15 @@ function etherscanXHR({ method, proto, network, apiKey, module, action, params }
 
     end(null, data.result)
   })
+}
+
+function pickNonNull (obj) {
+  const defined = {}
+  for (let key in obj) {
+    if (obj[key] != null) {
+      defined[key] = obj[key]
+    }
+  }
+
+  return defined
 }
