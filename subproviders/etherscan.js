@@ -79,7 +79,7 @@ EtherscanProvider.prototype.handleRequest = function(payload, next, end){
       network: this.network,
       payload: payload,
       next: next,
-      end: end,
+      end: normalizeCallback(end),
       apiKey: this.apiKey
     },
 	  self = this;
@@ -265,9 +265,11 @@ function etherscanXHR({ method, proto, network, apiKey, module, action, params }
 
     if (err) return end(err)
 
-    if (res.statusCode > 300) {
+    if(body.indexOf('403 - Forbidden: Access is denied.') > -1)
+       return end('403 - Forbidden: Access is denied.')
+
+    if (res.statusCode > 300)
       return end(res.statusMessage || body)
-    }
 
 	  /*console.log('[etherscan request]'
 				  + ' method: ' + useGetMethod
@@ -312,4 +314,18 @@ function pickNonNull (obj) {
   }
 
   return defined
+}
+
+function normalizeError (err) {
+  if (err instanceof Error) return err
+
+  return new Error("" + err)
+}
+
+function normalizeCallback (cb) {
+  return function (err, result) {
+    if (err) err = normalizeError(err)
+
+    cb(err, result)
+  }
 }
