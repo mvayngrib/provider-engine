@@ -79,7 +79,7 @@ EtherscanProvider.prototype.handleRequest = function(payload, next, end){
       network: this.network,
       payload: payload,
       next: next,
-      end: end,
+      end: normalizeCallback(end),
       apiKey: this.apiKey
     },
 	  self = this;
@@ -314,4 +314,18 @@ function pickNonNull (obj) {
   }
 
   return defined
+}
+
+function normalizeError (err) {
+  if (err instanceof Error) return err
+
+  return new Error("" + err)
+}
+
+function normalizeCallback (cb) {
+  return function (err, result) {
+    if (err) err = normalizeError(err)
+
+    cb(err, result)
+  }
 }
