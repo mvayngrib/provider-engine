@@ -24,6 +24,7 @@
 
 const xhr = process.browser ? require('xhr') : require('request')
 const inherits = require('util').inherits
+const throttle = require('lodash/throttle')
 const Subprovider = require('./subprovider.js')
 const MAINNET = 'mainnet'
 
@@ -40,12 +41,31 @@ function EtherscanProvider(opts) {
   this.interval = isNaN(opts.interval) ? 1000 : opts.interval;
   this.retryFailed = typeof opts.retryFailed === 'boolean' ? opts.retryFailed : true; // not built yet
 
+  const maxRequestsPerSecond = opts.maxRequestsPerSecond || 5
+  this._handlePayload = throttle(this._handlePayload.bind(this), maxRequestsPerSecond)
+  this._running = false;
+}
+
+EtherscanProvider.prototype.start = function () {
+  if (this._running) return
+
   this.intervalId = setInterval(this.handleRequests, this.interval, this);
   unref(this.intervalId);
+  this._running = true;
+}
+
+EtherscanProvider.prototype.stop = function () {
+  if (!this._running) return
+
+  // cancel backed up throttled requests
+  const self = this;
+  self._handlePayload.cancel();
+  clearInterval(this.intervalId);
+  this._running = false;
 }
 
 EtherscanProvider.prototype.handleRequests = function(self){
-  self._handleRequests(self)
+  self._handleRequests(self);
   if(self.requests.length == 0) {
     unref(self.intervalId);
   }
@@ -60,12 +80,15 @@ EtherscanProvider.prototype._handleRequests = function(self){
 		var requestItem = self.requests.shift()
 
 		if(typeof requestItem !== 'undefined')
-			handlePayload(requestItem.proto, requestItem.network, requestItem.payload, requestItem.next, requestItem.end)
+			this._handlePayload(requestItem)
 	}
 }
 
 EtherscanProvider.prototype.handleRequest = function(payload, next, end){
-  end = normalizeCallback(end)
+  // make sure we're running
+  this.start();
+
+  end = normalizeCallback(end);
   var requestObject = {proto: this.proto, network: this.network, payload: payload, next: next, end: end},
 	  self = this;
 
@@ -79,6 +102,10 @@ EtherscanProvider.prototype.handleRequest = function(payload, next, end){
 
   this.requests.push(requestObject);
   ref(this.intervalId);
+}
+
+EtherscanProvider.prototype._handlePayload = function (requestItem) {
+  handlePayload(requestItem.proto, requestItem.network, requestItem.payload, requestItem.next, requestItem.end)
 }
 
 function handlePayload(proto, network, payload, next, end){
@@ -263,11 +290,11 @@ function etherscanXHR(useGetMethod, proto, network, module, action, params, end)
 }
 
 function unref (timeout) {
-  if (timeout.unref) timeout.unref();
+  if (timeout && timeout.unref) timeout.unref();
 }
 
 function ref (timeout) {
-  if (timeout.ref) timeout.ref();
+  if (timeout && timeout.ref) timeout.ref();
 }
 
 function pickNonNull (obj) {
